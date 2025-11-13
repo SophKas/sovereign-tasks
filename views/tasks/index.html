@@ -465,6 +465,101 @@
       }
     }
 
+    // --- Date helpers for recurrence ---
+    function parseDateFlexible(value) {
+      if (!value) return null;
+      var date;
+      try {
+        date = new Date(value);
+        if (Number.isNaN(date.getTime())) {
+          var parts = String(value).split('-');
+          if (parts.length === 3) {
+            var year = Number(parts[0]);
+            var month = Number(parts[1]) - 1;
+            var day = Number(parts[2]);
+            date = new Date(year, month, day);
+          }
+        }
+      } catch (e) {
+        return null;
+      }
+      if (!date || Number.isNaN(date.getTime())) {
+        return null;
+      }
+      return date;
+    }
+
+    function addDays(date, days) {
+      var d = new Date(date.getTime());
+      d.setDate(d.getDate() + days);
+      return d;
+    }
+
+    function addMonths(date, months) {
+      var d = new Date(date.getTime());
+      var day = d.getDate();
+      d.setDate(1);
+      d.setMonth(d.getMonth() + months);
+      var y = d.getFullYear();
+      var m = d.getMonth();
+      var daysInMonth = new Date(y, m + 1, 0).getDate();
+      d.setDate(Math.min(day, daysInMonth));
+      return d;
+    }
+
+    function addYears(date, years) {
+      var d = new Date(date.getTime());
+      d.setFullYear(d.getFullYear() + years);
+      return d;
+    }
+
+    function computeNextDueDate(currentDate, recurring) {
+      if (!recurring || !currentDate) return null;
+
+      var r = recurring;
+
+      function fromPreset(preset) {
+        if (!preset) return null;
+        if (preset === 'daily') return addDays(currentDate, 1);
+        if (preset === 'weekly') return addDays(currentDate, 7);
+        if (preset === 'monthly') return addMonths(currentDate, 1);
+        if (preset === 'yearly') return addYears(currentDate, 1);
+        if (preset === 'weekday') {
+          // Next weekday (Mon–Fri)
+          var d = addDays(currentDate, 1);
+          while (d.getDay() === 0 || d.getDay() === 6) {
+            d = addDays(d, 1);
+          }
+          return d;
+        }
+        return null;
+      }
+
+      // Legacy string form
+      if (typeof r === 'string') {
+        return fromPreset(r);
+      }
+
+      if (typeof r !== 'object') return null;
+
+      if (r.kind === 'preset') {
+        return fromPreset(r.preset);
+      }
+
+      if (r.kind === 'custom' && r.custom) {
+        var interval = r.custom.interval || 1;
+        var unit = r.custom.unit || 'day';
+        if (interval < 1) interval = 1;
+
+        if (unit === 'day') return addDays(currentDate, interval);
+        if (unit === 'week') return addDays(currentDate, interval * 7);
+        if (unit === 'month') return addMonths(currentDate, interval);
+        if (unit === 'year') return addYears(currentDate, interval);
+      }
+
+      return null;
+    }
+
     var STORAGE_KEY = 'sv:tasks:state:v1';
     var CURRENT_VERSION = '0.1.1';
 
@@ -531,6 +626,61 @@
       }
 
       var data = state.data;
+
+      // Ensure tasks
+      if (!data.tasks || typeof data.tasks !== 'object') {
+        data.tasks = {};
+      }
+
+      // Migrate legacy recurring values on tasks (string -> structured object)
+      Object.keys(data.tasks).forEach(function (taskId) {
+        var task = data.tasks[taskId];
+        if (!task || typeof task !== 'object') return;
+
+        var r = task.recurring;
+        if (!r) {
+          task.recurring = null;
+          return;
+        }
+
+        // If it's already a structured object, normalise it
+        if (typeof r === 'object') {
+          if (r.kind === 'custom') {
+            if (!r.custom || typeof r.custom !== 'object') {
+              r.custom = {
+                interval: 1,
+                unit: 'day',
+                ends: { type: 'never' },
+              };
+            } else {
+              if (typeof r.custom.interval !== 'number' || r.custom.interval <= 0) {
+                r.custom.interval = 1;
+              }
+              if (!r.custom.unit) {
+                r.custom.unit = 'day';
+              }
+              if (!r.custom.ends || typeof r.custom.ends !== 'object') {
+                r.custom.ends = { type: 'never' };
+              }
+            }
+          }
+          task.recurring = r;
+          return;
+        }
+
+        // Legacy string values like 'daily', 'weekly'
+        if (typeof r === 'string') {
+          if (r === 'daily' || r === 'weekly' || r === 'monthly' || r === 'yearly' || r === 'weekday') {
+            task.recurring = {
+              kind: 'preset',
+              preset: r,
+            };
+          } else {
+            // Unknown string; best effort: drop recurrence
+            task.recurring = null;
+          }
+        }
+      });
 
       // Ensure lists
       if (!data.lists || Object.keys(data.lists).length === 0) {
@@ -773,7 +923,89 @@
       var task = state.data.tasks[numericId];
       if (!task) return;
 
-      task.completed = !task.completed;
+      var wasCompleted = !!task.completed;
+
+      // If un-completing, just flip to false
+      if (wasCompleted) {
+        task.completed = false;
+        task.updatedAt = nowISO();
+        touchUpdatedAt();
+        render();
+        return;
+      }
+
+      // From incomplete -> complete
+      var r = task.recurring;
+      var hasRecurrence = !!r;
+      var hasDueDate = !!task.dueDate;
+
+      // If no recurrence or no due date, behave like a normal task
+      if (!hasRecurrence || !hasDueDate) {
+        task.completed = true;
+        task.updatedAt = nowISO();
+        touchUpdatedAt();
+        render();
+        return;
+      }
+
+      var currentDue = parseDateFlexible(task.dueDate);
+      if (!currentDue) {
+        // Fallback to simple toggle if due date is invalid
+        task.completed = true;
+        task.updatedAt = nowISO();
+        touchUpdatedAt();
+        render();
+        return;
+      }
+
+      var nextDate = computeNextDueDate(currentDue, r);
+      if (!nextDate) {
+        // If we can't compute a next date, fallback to simple completion
+        task.completed = true;
+        task.updatedAt = nowISO();
+        touchUpdatedAt();
+        render();
+        return;
+      }
+
+      var stopRecurrence = false;
+
+      // Respect custom 'ends' configuration for custom recurrences
+      if (typeof r === 'object' && r.kind === 'custom' && r.custom && r.custom.ends) {
+        var ends = r.custom.ends;
+        var type = ends.type || 'never';
+
+        if (type === 'afterCount') {
+          var count = parseInt(ends.count, 10);
+          if (!count || count <= 1) {
+            // This was the last occurrence
+            stopRecurrence = true;
+          } else {
+            // Decrement remaining occurrences
+            ends.count = count - 1;
+          }
+        } else if (type === 'onDate' && ends.date) {
+          var endDate = parseDateFlexible(ends.date);
+          if (endDate && nextDate > endDate) {
+            // Next occurrence would go beyond the end date
+            stopRecurrence = true;
+          }
+        }
+      }
+
+      if (stopRecurrence) {
+        // Treat this as the final completion: mark completed and drop recurrence
+        task.completed = true;
+        task.recurring = null;
+        task.updatedAt = nowISO();
+        touchUpdatedAt();
+        render();
+        return;
+      }
+
+      // Otherwise, auto-reschedule: advance due date and keep task active
+      task.dueDate = nextDate.toISOString().slice(0, 10); // store as YYYY-MM-DD
+      task.completed = false; // stays active
       task.updatedAt = nowISO();
       touchUpdatedAt();
       render();
@@ -895,28 +1127,196 @@
       var labelRecurring = document.createElement('label');
       labelRecurring.className = 'sv-tasks__modal-label';
       labelRecurring.textContent = 'Repeat';
+
       var selectRecurring = document.createElement('select');
       selectRecurring.className = 'sv-tasks__modal-input';
 
-      var options = [
-        { value: '', label: 'None' },
-        { value: 'daily', label: 'Daily' },
-        { value: 'weekly', label: 'Weekly' },
+      var recurringOptions = [
+        { value: '', label: 'Does not repeat' },
+        { value: 'daily', label: 'Every day' },
+        { value: 'weekly', label: 'Every week' },
+        { value: 'monthly', label: 'Every month' },
+        { value: 'yearly', label: 'Every year' },
+        { value: 'weekday', label: 'Every weekday (Mon–Fri)' },
+        { value: 'custom', label: 'Custom…' },
       ];
 
-      options.forEach(function (opt) {
+      recurringOptions.forEach(function (opt) {
         var o = document.createElement('option');
         o.value = opt.value;
         o.textContent = opt.label;
         selectRecurring.appendChild(o);
       });
 
-      if (task.recurring) {
-        selectRecurring.value = String(task.recurring);
+      // Custom recurrence: Every [N] [day/week/month/year]
+      var customRecurringWrapper = document.createElement('div');
+      customRecurringWrapper.className = 'flex row gap-xs align-items-center';
+      customRecurringWrapper.style.marginTop = '4px';
+
+      var customEveryLabel = document.createElement('span');
+      customEveryLabel.textContent = 'Every';
+
+      var customIntervalInput = document.createElement('input');
+      customIntervalInput.type = 'number';
+      customIntervalInput.min = '1';
+      customIntervalInput.value = '1';
+      customIntervalInput.className = 'sv-tasks__modal-input';
+      customIntervalInput.style.maxWidth = '80px';
+
+      var customUnitSelect = document.createElement('select');
+      customUnitSelect.className = 'sv-tasks__modal-input';
+      customUnitSelect.style.maxWidth = '120px';
+
+      [
+        { value: 'day', label: 'day' },
+        { value: 'week', label: 'week' },
+        { value: 'month', label: 'month' },
+        { value: 'year', label: 'year' },
+      ].forEach(function (opt) {
+        var o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        customUnitSelect.appendChild(o);
+      });
+
+      customRecurringWrapper.appendChild(customEveryLabel);
+      customRecurringWrapper.appendChild(customIntervalInput);
+      customRecurringWrapper.appendChild(customUnitSelect);
+
+      // Custom recurrence end configuration: Ends [Does not end / On date / After N times]
+      var customEndsWrapper = document.createElement('div');
+      customEndsWrapper.className = 'flex row gap-xs align-items-center';
+      customEndsWrapper.style.marginTop = '4px';
+
+      var customEndsLabel = document.createElement('span');
+      customEndsLabel.textContent = 'Ends';
+
+      var customEndsSelect = document.createElement('select');
+      customEndsSelect.className = 'sv-tasks__modal-input';
+      customEndsSelect.style.maxWidth = '160px';
+
+      [
+        { value: 'never',      label: 'Does not end' },
+        { value: 'onDate',     label: 'On date' },
+        { value: 'afterCount', label: 'After' },
+      ].forEach(function (opt) {
+        var o = document.createElement('option');
+        o.value = opt.value;
+        o.textContent = opt.label;
+        customEndsSelect.appendChild(o);
+      });
+
+      var customEndsDateInput = document.createElement('input');
+      customEndsDateInput.type = 'date';
+      customEndsDateInput.className = 'sv-tasks__modal-input';
+      customEndsDateInput.style.maxWidth = '160px';
+
+      var customEndsCountInput = document.createElement('input');
+      customEndsCountInput.type = 'number';
+      customEndsCountInput.min = '1';
+      customEndsCountInput.value = '1';
+      customEndsCountInput.className = 'sv-tasks__modal-input';
+      customEndsCountInput.style.maxWidth = '80px';
+
+      var customEndsCountSuffix = document.createElement('span');
+      customEndsCountSuffix.textContent = 'occurrences';
+
+      customEndsWrapper.appendChild(customEndsLabel);
+      customEndsWrapper.appendChild(customEndsSelect);
+      customEndsWrapper.appendChild(customEndsDateInput);
+      customEndsWrapper.appendChild(customEndsCountInput);
+      customEndsWrapper.appendChild(customEndsCountSuffix);
+
+      function applyRecurringFromTask() {
+        var recurring = task.recurring;
+        var presetValue = '';
+        var intervalValue = 1;
+        var unitValue = 'day';
+        var endsType = 'never';
+        var endsCount = 1;
+        var endsDate = '';
+
+        if (recurring) {
+          if (typeof recurring === 'string') {
+            presetValue = recurring;
+          } else if (typeof recurring === 'object') {
+            if (recurring.kind === 'preset') {
+              presetValue = recurring.preset || '';
+            } else if (recurring.kind === 'custom' && recurring.custom) {
+              presetValue = 'custom';
+              if (typeof recurring.custom.interval === 'number' && recurring.custom.interval > 0) {
+                intervalValue = recurring.custom.interval;
+              }
+              if (recurring.custom.unit) {
+                unitValue = recurring.custom.unit;
+              }
+              if (recurring.custom.ends && typeof recurring.custom.ends === 'object') {
+                endsType = recurring.custom.ends.type || 'never';
+                if (recurring.custom.ends.type === 'afterCount' && typeof recurring.custom.ends.count === 'number') {
+                  endsCount = recurring.custom.ends.count;
+                } else if (recurring.custom.ends.type === 'onDate' && recurring.custom.ends.date) {
+                  endsDate = recurring.custom.ends.date;
+                }
+              }
+            }
+          }
+        }
+
+        selectRecurring.value = presetValue;
+        customIntervalInput.value = String(intervalValue);
+        customUnitSelect.value = unitValue;
+
+        customEndsSelect.value = endsType;
+        customEndsCountInput.value = String(endsCount);
+        customEndsDateInput.value = endsDate;
+
+        updateCustomVisibility();
       }
+
+      function updateCustomVisibility() {
+        var isCustom = selectRecurring.value === 'custom';
+        customRecurringWrapper.style.display = isCustom ? 'flex' : 'none';
+        customEndsWrapper.style.display = isCustom ? 'flex' : 'none';
+
+        if (!isCustom) return;
+
+        // When custom is active, also toggle which end inputs are visible
+        updateEndsVisibility();
+      }
+
+      function updateEndsVisibility() {
+        var mode = customEndsSelect.value || 'never';
+
+        if (mode === 'onDate') {
+          customEndsDateInput.style.display = 'inline-block';
+          customEndsCountInput.style.display = 'none';
+          customEndsCountSuffix.style.display = 'none';
+        } else if (mode === 'afterCount') {
+          customEndsDateInput.style.display = 'none';
+          customEndsCountInput.style.display = 'inline-block';
+          customEndsCountSuffix.style.display = 'inline-block';
+        } else {
+          // never
+          customEndsDateInput.style.display = 'none';
+          customEndsCountInput.style.display = 'none';
+          customEndsCountSuffix.style.display = 'none';
+        }
+      }
+
+      selectRecurring.addEventListener('change', function () {
+        updateCustomVisibility();
+      });
+
+      customEndsSelect.addEventListener('change', function () {
+        updateEndsVisibility();
+      });
+
+      applyRecurringFromTask();
 
       fieldRecurring.appendChild(labelRecurring);
       fieldRecurring.appendChild(selectRecurring);
+      fieldRecurring.appendChild(customRecurringWrapper);
+      fieldRecurring.appendChild(customEndsWrapper);
 
       // Completed / starred checkboxes
       var fieldFlags = document.createElement('div');
@@ -988,11 +1388,49 @@
 
       form.addEventListener('submit', function (event) {
         event.preventDefault();
+
+        var recurringConfig = null;
+        var mode = selectRecurring.value;
+
+        if (mode && mode !== '') {
+          if (mode === 'custom') {
+            var interval = parseInt(customIntervalInput.value, 10);
+            if (!interval || interval < 1) interval = 1;
+            var unit = customUnitSelect.value || 'day';
+
+            var endsMode = customEndsSelect.value || 'never';
+            var ends = { type: 'never' };
+
+            if (endsMode === 'onDate') {
+              var d = customEndsDateInput.value || '';
+              ends = { type: 'onDate', date: d };
+            } else if (endsMode === 'afterCount') {
+              var c = parseInt(customEndsCountInput.value, 10);
+              if (!c || c < 1) c = 1;
+              ends = { type: 'afterCount', count: c };
+            }
+
+            recurringConfig = {
+              kind: 'custom',
+              custom: {
+                interval: interval,
+                unit: unit,
+                ends: ends,
+              },
+            };
+          } else {
+            recurringConfig = {
+              kind: 'preset',
+              preset: mode,
+            };
+          }
+        }
+
         saveTaskFromModal(numericId, {
           title: inputTitle.value,
           description: textareaDesc.value,
           dueDate: inputDue.value,
-          recurring: selectRecurring.value,
+          recurring: recurringConfig,
           completed: completedCheckbox.checked,
           starred: starredCheckbox.checked,
         });
@@ -1044,7 +1482,7 @@
       task.title = trimmedTitle;
       task.description = payload.description || null;
       task.dueDate = payload.dueDate || null;
-      task.recurring = payload.recurring ? payload.recurring : null;
+      task.recurring = payload.recurring || null;
       task.completed = !!payload.completed;
       task.starred = !!payload.starred;
       task.updatedAt = nowISO();
@@ -1473,14 +1911,58 @@
           if (task.recurring) {
             var recurSpan = document.createElement('span');
             var label = '';
-            if (task.recurring === 'daily') label = '• Repeats daily';
-            else if (task.recurring === 'weekly') label = '• Repeats weekly';
-            else label = '• Repeats';
-            if (meta.childNodes.length > 0) {
-              recurSpan.style.marginLeft = '0.25rem';
+            var r = task.recurring;
+
+            if (typeof r === 'string') {
+              if (r === 'daily') label = 'Repeats daily';
+              else if (r === 'weekly') label = 'Repeats weekly';
+              else if (r === 'monthly') label = 'Repeats monthly';
+              else if (r === 'yearly') label = 'Repeats yearly';
+              else if (r === 'weekday') label = 'Repeats on weekdays';
+              else label = 'Repeats';
+            } else if (typeof r === 'object') {
+              if (r.kind === 'preset') {
+                switch (r.preset) {
+                  case 'daily':
+                    label = 'Repeats daily';
+                    break;
+                  case 'weekly':
+                    label = 'Repeats weekly';
+                    break;
+                  case 'monthly':
+                    label = 'Repeats monthly';
+                    break;
+                  case 'yearly':
+                    label = 'Repeats yearly';
+                    break;
+                  case 'weekday':
+                    label = 'Repeats on weekdays';
+                    break;
+                  default:
+                    label = 'Repeats';
+                    break;
+                }
+              } else if (r.kind === 'custom' && r.custom) {
+                var iv = r.custom.interval || 1;
+                var unit = r.custom.unit || 'day';
+                var unitLabel = unit;
+                if (iv !== 1) {
+                  if (unit === 'day') unitLabel = 'days';
+                  else if (unit === 'week') unitLabel = 'weeks';
+                  else if (unit === 'month') unitLabel = 'months';
+                  else if (unit === 'year') unitLabel = 'years';
+                }
+                label = 'Every ' + iv + ' ' + unitLabel;
+              }
             }
-            recurSpan.textContent = label;
-            meta.appendChild(recurSpan);
+
+            if (label) {
+              if (meta.childNodes.length > 0) {
+                recurSpan.style.marginLeft = '0.25rem';
+              }
+              recurSpan.textContent = '• ' + label;
+              meta.appendChild(recurSpan);
+            }
           }
 
           content.appendChild(titleNode);
