@@ -1,0 +1,73 @@
+// ============================================================
+// Sovereign Tasks – Prisma Extension Schema (Phase 2 Draft)
+// This file defines server-side persistence for the Tasks plugin.
+// ============================================================
+
+// ============================================================
+// TASK LISTS
+// ============================================================
+
+model TaskList {
+  id         Int      @id @default(autoincrement()) @map("id")
+  userId     String   @map("user_id")
+  name       String   @map("name")
+  slug       String   @map("slug")
+  position   Int      @default(0) @map("position") // ordering among lists
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  // Relations
+  tasks      Task[]
+
+  @@index([userId])
+  @@index([position])
+  @@unique([userId, slug])
+  @@map("task_lists")
+}
+
+// ============================================================
+// TASKS
+// ============================================================
+
+model Task {
+  id                Int       @id @default(autoincrement()) @map("id")
+  userId            String    @map("user_id")
+  listId            Int       @map("list_id")
+  title             String    @map("title")
+  description       String?   @db.Text @map("description")
+  dueDate           DateTime? @map("due_date")
+  recurringRule     String?   @map("recurring_rule")
+  recurringInterval Int?      @map("recurring_interval")
+  completed         Boolean   @default(false) @map("completed")
+  starred           Boolean   @default(false) @map("starred")
+  position          Int       @default(0) @map("position") // ordering inside list
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+
+  // Relations
+  list              TaskList  @relation(fields: [listId], references: [id])
+
+  @@index([userId])
+  @@index([listId])
+  @@index([position])
+  @@map("tasks")
+}
+
+// ============================================================
+// OPTIONAL: REMINDERS / AUTOMATION HOOKS (Phase 2.5+)
+// ============================================================
+
+model TaskReminder {
+  id           Int       @id @default(autoincrement()) @map("id")
+  taskId       Int       @map("task_id")
+  userId       String    @map("user_id")
+  reminderAt   DateTime  @map("reminder_at")
+  snoozeUntil  DateTime? @map("snooze_until")
+  sourcePlugin String?   @map("source_plugin")
+
+  task         Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([taskId])
+  @@map("task_reminders")
+}
