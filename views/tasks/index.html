@@ -18,10 +18,10 @@
   .sv-tasks__board {
     display: flex;
     flex-direction: row;
-    align-items: flex-start;
+    align-items: stretch;
     gap: var(--space-m);
     overflow-x: auto;
-    padding-bottom: var(--space-m);
+    padding-bottom: var(--space-xs);
   }
 
   /* List column */
@@ -30,11 +30,15 @@
     border-radius: var(--radius-m);
     box-shadow: var(--shadow-s);
     border: 1px solid var(--color-border-primary);
-    min-width: 260px;
-    max-width: 320px;
+    min-width: 300px;
+    max-width: 360px;
     padding: var(--space-s);
     box-sizing: border-box;
     flex-shrink: 0;
+    display: flex;
+    flex-direction: column;
+    /* Make columns reach closer to the bottom of the viewport */
+    height: calc(100vh - 155px);
   }
 
   .sv-tasks__list--dragging {
@@ -45,6 +49,60 @@
 
   .sv-tasks__list-header {
     margin-bottom: var(--space-s);
+    position: relative;
+  }
+
+  .sv-tasks__list-menu-button {
+    font-size: 1.1rem;
+    min-width: 28px;
+    min-height: 28px;
+  }
+
+  .sv-tasks__list-menu {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    margin-top: var(--space-2xs);
+    background: #ffffff;
+    border-radius: var(--radius-s);
+    box-shadow: var(--shadow-m);
+    border: 1px solid var(--color-border-primary);
+    min-width: 180px;
+    z-index: 20;
+    padding: var(--space-2xs) 0;
+    overflow: hidden;
+  }
+
+  .sv-tasks__list-menu-item {
+    width: 100%;
+    padding: var(--space-2xs) var(--space-s);
+    font-size: 0.8rem;
+    text-align: left;
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    color: var(--color-text-primary);
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .sv-tasks__list-menu-item:hover {
+    background: var(--color-bg-secondary);
+  }
+
+  .sv-tasks__list-menu-item[data-variant="danger"] {
+    color: var(--color-status-danger, #c0392b);
+  }
+
+  .sv-tasks__list-menu-item[data-variant="danger"]:hover {
+    background: rgba(192, 57, 43, 0.06);
+  }
+
+  .sv-tasks__list-menu-divider {
+    height: 1px;
+    margin: var(--space-3xs) 0;
+    background: var(--color-border-subtle, #eeeeee);
   }
 
   .sv-tasks__list-title {
@@ -64,6 +122,9 @@
   .sv-tasks__list-body {
     min-height: 40px; /* small target even when empty */
     margin-bottom: var(--space-s);
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: var(--space-s);
   }
 
   /* Task cards */
@@ -162,6 +223,10 @@
     font-size: 0.875rem;
   }
 
+  .sv-tasks__add-task {
+    margin-bottom: var(--space-s);
+  }
+
   /* Add-list column */
   .sv-tasks__add-list {
     min-width: 260px;
@@ -172,8 +237,9 @@
     border: 1px dashed var(--color-border-primary);
     padding: var(--space-s);
     display: flex;
-    align-items: center;
-    justify-content: center;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
   }
 
   .sv-tasks__modal-backdrop {
@@ -1077,6 +1143,66 @@
       render();
     }
 
+    function closeAllListMenus() {
+      var root = document.getElementById('sv-tasks-root');
+      if (!root) return;
+      var menus = root.querySelectorAll('.sv-tasks__list-menu');
+      menus.forEach(function (menu) {
+        if (menu.parentNode) {
+          menu.parentNode.removeChild(menu);
+        }
+      });
+    }
+
+    function sortTasksInList(listId, mode) {
+      var state = window.$state;
+      if (!state || !state.data) return;
+
+      var tasks = state.data.tasks || {};
+      var taskIdsByListId = state.data.taskIdsByListId || {};
+      var numericListId = Number(listId);
+      var taskIds = (taskIdsByListId[numericListId] || []).slice();
+
+      if (!taskIds.length) return;
+
+      taskIds.sort(function (a, b) {
+        var ta = tasks[a];
+        var tb = tasks[b];
+        if (!ta && !tb) return 0;
+        if (!ta) return 1;
+        if (!tb) return -1;
+
+        if (mode === 'title') {
+          var at = (ta.title || '').toLowerCase();
+          var bt = (tb.title || '').toLowerCase();
+          if (at < bt) return -1;
+          if (at > bt) return 1;
+          return 0;
+        }
+
+        if (mode === 'dueDate') {
+          var ad = ta.dueDate ? new Date(ta.dueDate).getTime() : Infinity;
+          var bd = tb.dueDate ? new Date(tb.dueDate).getTime() : Infinity;
+          if (ad < bd) return -1;
+          if (ad > bd) return 1;
+          return 0;
+        }
+
+        // Default: createdAt ascending
+        var ac = ta.createdAt ? new Date(ta.createdAt).getTime() : 0;
+        var bc = tb.createdAt ? new Date(tb.createdAt).getTime() : 0;
+        if (ac < bc) return -1;
+        if (ac > bc) return 1;
+        return 0;
+      });
+
+      taskIdsByListId[numericListId] = taskIds;
+      state.data.taskIdsByListId = taskIdsByListId;
+
+      touchUpdatedAt();
+      render();
+    }
+
     function render() {
       const root = document.getElementById('sv-tasks-root');
       if (!root || !window.$state || !window.$state.data) return;
@@ -1163,15 +1289,66 @@
         menuButton.className = 'sv-icon-button sv-tasks__list-menu-button';
         menuButton.setAttribute('aria-label', 'List actions');
         menuButton.dataset.action = 'open-list-menu';
-        menuButton.textContent = '⋯';
+        menuButton.textContent = '⚙';
 
-        menuButton.addEventListener('click', function () {
-          var ok = window.confirm
-            ? window.confirm('Delete list "' + list.name + '" and all its tasks?')
-            : true;
-          if (ok) {
-            deleteList(listId);
+        menuButton.addEventListener('click', function (event) {
+          event.stopPropagation();
+
+          // Toggle menu: if already open for this header, close it
+          var existing = headerEl.querySelector('.sv-tasks__list-menu');
+          if (existing) {
+            existing.parentNode.removeChild(existing);
+            return;
           }
+
+          closeAllListMenus();
+
+          var menu = document.createElement('div');
+          menu.className = 'sv-tasks__list-menu';
+          menu.dataset.role = 'list-menu';
+
+          function addItem(label, handler, variant) {
+            var item = document.createElement('button');
+            item.type = 'button';
+            item.className = 'sv-tasks__list-menu-item';
+            item.textContent = label;
+            if (variant) {
+              item.dataset.variant = variant;
+            }
+            item.addEventListener('click', function (e) {
+              e.stopPropagation();
+              handler();
+              closeAllListMenus();
+            });
+            menu.appendChild(item);
+          }
+
+          addItem('Sort by created time', function () {
+            sortTasksInList(listId, 'createdAt');
+          });
+
+          addItem('Sort by title (A–Z)', function () {
+            sortTasksInList(listId, 'title');
+          });
+
+          addItem('Sort by due date', function () {
+            sortTasksInList(listId, 'dueDate');
+          });
+
+          var divider = document.createElement('div');
+          divider.className = 'sv-tasks__list-menu-divider';
+          menu.appendChild(divider);
+
+          addItem('Delete list', function () {
+            var ok = window.confirm
+              ? window.confirm('Delete list "' + list.name + '" and all its tasks?')
+              : true;
+            if (ok) {
+              deleteList(listId);
+            }
+          }, 'danger');
+
+          headerEl.appendChild(menu);
         });
 
         headerEl.appendChild(titleEl);
@@ -1194,7 +1371,25 @@
 
         // Render tasks for this list, if any
         const taskIds = (taskIdsByListId && taskIdsByListId[listId]) || [];
+
+        // Keep active tasks first and completed tasks at the bottom,
+        // while preserving original relative order inside each group.
+        var orderedTaskIds = [];
+        var completedTaskIds = [];
+
         taskIds.forEach(function (taskId) {
+          var task = tasks && tasks[taskId];
+          if (!task) return;
+          if (task.completed) {
+            completedTaskIds.push(taskId);
+          } else {
+            orderedTaskIds.push(taskId);
+          }
+        });
+
+        orderedTaskIds = orderedTaskIds.concat(completedTaskIds);
+
+        orderedTaskIds.forEach(function (taskId) {
           var task = tasks && tasks[taskId];
           if (!task) return;
           if (currentFilter === 'active' && task.completed) {
@@ -1345,8 +1540,9 @@
         addTaskEl.appendChild(addTaskInput);
 
         listEl.appendChild(headerEl);
-        listEl.appendChild(bodyEl);
+        // Add-task input at the top of the column, just under the header
         listEl.appendChild(addTaskEl);
+        listEl.appendChild(bodyEl);
 
         board.appendChild(listEl);
       });
@@ -1482,6 +1678,11 @@
           var filter = btn.dataset.filter;
           setTaskFilter(filter);
         });
+      });
+
+      // Close any open list menus when clicking outside
+      document.addEventListener('click', function () {
+        closeAllListMenus();
       });
     });
 
