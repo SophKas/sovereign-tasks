@@ -1,0 +1,893 @@
+<style>
+  .sv-page__grid {
+    padding: 5px 20px;
+  }
+  /* Root container for the plugin */
+  .sv-tasks {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-m);
+    padding-block: var(--space-m);
+  }
+
+  .sv-tasks__toolbar {
+    margin-bottom: var(--space-s);
+  }
+
+  /* Horizontal board of columns */
+  .sv-tasks__board {
+    display: flex;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--space-m);
+    overflow-x: auto;
+    padding-bottom: var(--space-m);
+  }
+
+  /* List column */
+  .sv-tasks__list {
+    background: #ffffff;
+    border-radius: var(--radius-m);
+    box-shadow: var(--shadow-s);
+    border: 1px solid var(--color-border-primary);
+    min-width: 260px;
+    max-width: 320px;
+    padding: var(--space-s);
+    box-sizing: border-box;
+    flex-shrink: 0;
+  }
+
+  .sv-tasks__list--dragging {
+    opacity: 0.9;
+    box-shadow: var(--shadow-m);
+    transform: translateY(-1px);
+  }
+
+  .sv-tasks__list-header {
+    margin-bottom: var(--space-s);
+  }
+
+  .sv-tasks__list-title {
+    font-weight: 600;
+  }
+
+  .sv-tasks__list-title-input {
+    font: inherit;
+    color: var(--color-text-primary);
+    border-radius: var(--radius-s);
+    border: 1px solid var(--color-border-primary);
+    padding: 0 var(--space-2xs);
+    width: 100%;
+    background: transparent;
+  }
+
+  .sv-tasks__list-body {
+    min-height: 40px; /* small target even when empty */
+    margin-bottom: var(--space-s);
+  }
+
+  /* Task cards */
+  .sv-tasks__task-card {
+    background: #ffffff;
+    border-radius: var(--radius-s);
+    border: 1px solid var(--color-border-primary);
+    padding: var(--space-2xs) var(--space-xs);
+    box-sizing: border-box;
+    cursor: grab;
+    transition: background-color 120ms ease, box-shadow 120ms ease, transform 120ms ease;
+  }
+
+  .sv-tasks__task-card + .sv-tasks__task-card {
+    margin-top: var(--space-2xs);
+  }
+
+  .sv-tasks__task-card:hover {
+    background: var(--color-bg-muted);
+  }
+
+  .sv-tasks__task-card--dragging {
+    opacity: 0.9;
+    box-shadow: var(--shadow-m);
+    transform: translateY(-1px);
+  }
+
+  .sv-tasks__task-main {
+    align-items: center;
+  }
+
+  .sv-tasks__task-checkbox {
+    margin-right: var(--space-2xs);
+  }
+
+  .sv-tasks__task-star {
+    margin-right: var(--space-2xs);
+    font-size: 0.85rem;
+  }
+
+  .sv-tasks__task-title {
+    font-size: 0.875rem;
+    color: var(--color-text-primary);
+  }
+
+  .sv-tasks__task-meta {
+    font-size: 0.75rem;
+    color: var(--color-text-secondary);
+  }
+
+  /* Completed state */
+  .sv-tasks__task-card--completed .sv-tasks__task-title {
+    text-decoration: line-through;
+    color: var(--color-text-secondary);
+  }
+  .sv-tasks__task-card--completed {
+    opacity: 0.6;
+  }
+
+  .sv-tasks__task-card--starred .sv-tasks__task-title {
+    font-weight: 600;
+  }
+
+  .sv-tasks__task-card--starred .sv-tasks__task-star {
+    color: var(--color-accent-primary);
+  }
+  .sv-tasks__filter-button {
+    border-radius: var(--radius-s);
+    border: 1px solid transparent;
+    padding: 0 var(--space-xs);
+    font-size: 0.8rem;
+    line-height: 1.8;
+    cursor: pointer;
+    background: transparent;
+    color: var(--color-text-secondary);
+  }
+
+  .sv-tasks__filter-button--active {
+    border-color: var(--color-border-primary);
+    background: var(--color-bg-secondary);
+    color: var(--color-text-primary);
+  }
+
+  /* Add-task input */
+  .sv-tasks__add-task-input {
+    width: 100%;
+    box-sizing: border-box;
+    border-radius: var(--radius-s);
+    border: 1px dashed var(--color-border-primary);
+    padding: var(--space-2xs) var(--space-xs);
+    font-size: 0.875rem;
+  }
+
+  /* Add-list column */
+  .sv-tasks__add-list {
+    min-width: 260px;
+    max-width: 320px;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    border-radius: var(--radius-m);
+    border: 1px dashed var(--color-border-primary);
+    padding: var(--space-s);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+</style>
+<div class="sv-page__wrap--full">
+  <section class="sv-page__grid">
+    <div id="sv-tasks-root" class="sv-tasks">
+      <!-- Board toolbar (reserved for future use) -->
+      <div class="sv-tasks__toolbar flex row align-items-center flex-space-between">
+        <div class="sv-tasks__toolbar-left flex row gap-s">
+          <span class="sv-h-5">My lists</span>
+        </div>
+        <div class="sv-tasks__toolbar-right flex row gap-xs">
+          <button type="button" class="sv-tasks__filter-button" data-filter="all">All</button>
+          <button type="button" class="sv-tasks__filter-button" data-filter="active">Active</button>
+          <button type="button" class="sv-tasks__filter-button" data-filter="completed">Completed</button>
+        </div>
+      </div>
+
+      <!-- Kanban board: lists row -->
+      <div class="sv-tasks__board flex row gap-m" data-role="board">
+        <!-- Lists will be rendered here by render() -->
+
+        <!-- Example list column (for reference only, will be generated in JS) -->
+        <!--
+        <article class="sv-tasks__list" data-list-id="1">
+          <header class="sv-tasks__list-header flex row align-items-center flex-space-between">
+            <h2 class="sv-h-5 sv-tasks__list-title">Inbox</h2>
+            <button
+              class="sv-icon-button sv-tasks__list-menu-button"
+              type="button"
+              data-action="open-list-menu"
+              aria-label="List actions"
+            >
+              ⋯
+            </button>
+          </header>
+
+          <div class="sv-tasks__list-body flex col gap-xs">
+            <div
+              class="sv-tasks__task-card"
+              data-task-id="100"
+              draggable="true"
+            >
+              <div class="sv-tasks__task-main flex row gap-xs align-items-center">
+                <input
+                  class="sv-tasks__task-checkbox"
+                  type="checkbox"
+                  data-action="toggle-completed"
+                />
+                <button
+                  class="sv-icon-button sv-tasks__task-star"
+                  type="button"
+                  data-action="toggle-starred"
+                  aria-label="Mark as important"
+                >
+                  ★
+                </button>
+                <div class="sv-tasks__task-content flex col gap-2xs">
+                  <div class="sv-tasks__task-title">Buy coffee beans</div>
+                  <div class="sv-tasks__task-meta">
+                    <time datetime="2025-11-15">15 Nov</time>
+                    <!-- future: recurrence icon, list name, etc. -->
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </article>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+  (function () {
+    function nowISO() {
+      return new Date().toISOString();
+    }
+
+    function touchUpdatedAt() {
+      if (!window.$state || !window.$state.meta) return;
+      window.$state.meta.updatedAt = nowISO();
+    }
+
+    function focusAddTaskInput(listId) {
+      var root = document.getElementById('sv-tasks-root');
+      if (!root) return;
+      var board = root.querySelector('[data-role="board"]');
+      if (!board) return;
+      var selector = '.sv-tasks__list[data-list-id="' + String(listId) + '"] .sv-tasks__add-task-input';
+      var input = board.querySelector(selector);
+      if (input) {
+        input.focus();
+      }
+    }
+
+    function nextNumericId(map) {
+      const keys = Object.keys(map || {});
+      if (!keys.length) return 1;
+      const numeric = keys
+        .map(function (k) { return Number(k); })
+        .filter(function (n) { return !Number.isNaN(n); });
+      if (!numeric.length) return 1;
+      return Math.max.apply(null, numeric) + 1;
+    }
+
+    function initState() {
+      if (window.$state && window.$state.data && window.$state.data.lists) {
+        return;
+      }
+
+      const now = nowISO();
+
+      window.$state = {
+        meta: {
+          createdAt: now,
+          updatedAt: now,
+          version: '0.1.0',
+        },
+        data: {
+          lists: {
+            1: {
+              id: 1,
+              name: 'Inbox',
+              slug: 'inbox',
+              createdAt: now,
+              updatedAt: now,
+            },
+          },
+          tasks: {},
+          taskIdsByListId: {
+            1: [],
+          },
+          listOrder: [1],
+        },
+        ui: {
+          taskFilter: 'all',
+        },
+      };
+    }
+
+    function renameList(listId, newName) {
+      var state = window.$state;
+      if (!state || !state.data || !state.data.lists) return;
+
+      var lists = state.data.lists;
+      var numericId = Number(listId);
+      var list = lists[numericId];
+      if (!list) return;
+
+      var trimmed = (newName || '').trim();
+      if (!trimmed || trimmed === list.name) {
+        // No change; just re-render to exit edit mode
+        render();
+        return;
+      }
+
+      list.name = trimmed;
+      list.slug = trimmed.toLowerCase().replace(/\s+/g, '-');
+      list.updatedAt = nowISO();
+      touchUpdatedAt();
+      render();
+    }
+
+    function addList(name) {
+      var state = window.$state;
+      if (!state || !state.data) return;
+      var trimmed = (name || '').trim();
+      if (!trimmed) return;
+
+      var lists = state.data.lists || {};
+      var taskIdsByListId = state.data.taskIdsByListId || {};
+      var listOrder = state.data.listOrder || [];
+
+      var id = nextNumericId(lists);
+      var now = nowISO();
+
+      lists[id] = {
+        id: id,
+        name: trimmed,
+        slug: trimmed.toLowerCase().replace(/\s+/g, '-'),
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      taskIdsByListId[id] = [];
+      listOrder.push(id);
+
+      state.data.lists = lists;
+      state.data.taskIdsByListId = taskIdsByListId;
+      state.data.listOrder = listOrder;
+
+      touchUpdatedAt();
+      render();
+    }
+    function setTaskFilter(filter) {
+      var state = window.$state;
+      if (!state || !state.ui) return;
+      if (!filter) return;
+      state.ui.taskFilter = filter;
+      touchUpdatedAt();
+      render();
+      applyTaskFilterUI();
+    }
+
+    function applyTaskFilterUI() {
+      var root = document.getElementById('sv-tasks-root');
+      if (!root) return;
+      var buttons = root.querySelectorAll('.sv-tasks__filter-button');
+      var current = (window.$state && window.$state.ui && window.$state.ui.taskFilter) || 'all';
+      buttons.forEach(function (btn) {
+        if (btn.dataset.filter === current) {
+          btn.classList.add('sv-tasks__filter-button--active');
+        } else {
+          btn.classList.remove('sv-tasks__filter-button--active');
+        }
+      });
+    }
+
+    function addTask(listId, title) {
+      var state = window.$state;
+      if (!state || !state.data) return;
+
+      var trimmed = (title || '').trim();
+      if (!trimmed) return;
+
+      var lists = state.data.lists || {};
+      if (!lists[listId]) return; // invalid list id
+
+      var tasks = state.data.tasks || {};
+      var taskIdsByListId = state.data.taskIdsByListId || {};
+      var listTaskIds = taskIdsByListId[listId] || [];
+
+      var id = nextNumericId(tasks);
+      var now = nowISO();
+
+      tasks[id] = {
+        id: id,
+        listId: listId,
+        title: trimmed,
+        description: null,
+        dueDate: null,
+        recurring: null,
+        completed: false,
+        starred: false,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      listTaskIds.push(id);
+      taskIdsByListId[listId] = listTaskIds;
+
+      state.data.tasks = tasks;
+      state.data.taskIdsByListId = taskIdsByListId;
+
+      touchUpdatedAt();
+      render();
+      // After re-render, focus the add-task input for this list
+      focusAddTaskInput(listId);
+    }
+
+    function toggleTaskCompleted(taskId) {
+      var state = window.$state;
+      if (!state || !state.data || !state.data.tasks) return;
+
+      var numericId = Number(taskId);
+      var task = state.data.tasks[numericId];
+      if (!task) return;
+
+      task.completed = !task.completed;
+      task.updatedAt = nowISO();
+      touchUpdatedAt();
+      render();
+    }
+
+    function toggleTaskStarred(taskId) {
+      var state = window.$state;
+      if (!state || !state.data || !state.data.tasks) return;
+
+      var numericId = Number(taskId);
+      var task = state.data.tasks[numericId];
+      if (!task) return;
+
+      task.starred = !task.starred;
+      task.updatedAt = nowISO();
+      touchUpdatedAt();
+      render();
+    }
+
+    var dragState = {
+      taskId: null,
+      fromListId: null,
+    };
+
+    var listDragState = {
+      listId: null,
+    };
+
+    function moveList(listId, beforeListId) {
+      var state = window.$state;
+      if (!state || !state.data) return;
+
+      var listOrder = state.data.listOrder || [];
+      var numericListId = Number(listId);
+
+      // Remove the list from the current order
+      var newOrder = listOrder.filter(function (id) {
+        return Number(id) !== numericListId;
+      });
+
+      if (beforeListId != null) {
+        var numericBeforeId = Number(beforeListId);
+        var index = newOrder.findIndex(function (id) {
+          return Number(id) === numericBeforeId;
+        });
+        if (index === -1) {
+          newOrder.push(numericListId);
+        } else {
+          newOrder.splice(index, 0, numericListId);
+        }
+      } else {
+        // Append to the end
+        newOrder.push(numericListId);
+      }
+
+      state.data.listOrder = newOrder;
+      touchUpdatedAt();
+      render();
+    }
+
+    function moveTask(taskId, toListId, beforeTaskId) {
+      var state = window.$state;
+      if (!state || !state.data) return;
+
+      var tasks = state.data.tasks || {};
+      var taskIdsByListId = state.data.taskIdsByListId || {};
+
+      var numericTaskId = Number(taskId);
+      var numericToListId = Number(toListId);
+
+      var task = tasks[numericTaskId];
+      if (!task) return;
+      if (!state.data.lists[numericToListId]) return;
+
+      var fromListId = task.listId;
+      var numericFromListId = Number(fromListId);
+
+      // Remove from old list array
+      var fromListTaskIds = taskIdsByListId[numericFromListId] || [];
+      taskIdsByListId[numericFromListId] = fromListTaskIds.filter(function (id) {
+        return Number(id) !== numericTaskId;
+      });
+
+      // Insert into new list array, either before a specific task or at the end
+      var toListTaskIds = taskIdsByListId[numericToListId] || [];
+      var index = -1;
+      if (beforeTaskId != null) {
+        var numericBeforeId = Number(beforeTaskId);
+        index = toListTaskIds.findIndex(function (id) {
+          return Number(id) === numericBeforeId;
+        });
+      }
+      if (index === -1) {
+        toListTaskIds.push(numericTaskId);
+      } else {
+        toListTaskIds.splice(index, 0, numericTaskId);
+      }
+      taskIdsByListId[numericToListId] = toListTaskIds;
+
+      // Update task's listId
+      task.listId = numericToListId;
+      task.updatedAt = nowISO();
+
+      state.data.taskIdsByListId = taskIdsByListId;
+      touchUpdatedAt();
+      render();
+    }
+
+    function render() {
+      const root = document.getElementById('sv-tasks-root');
+      if (!root || !window.$state || !window.$state.data) return;
+
+      const board = root.querySelector('[data-role="board"]');
+      if (!board) return;
+
+      // Clear current board content so we can re-render from state
+      board.innerHTML = '';
+
+      const { lists, tasks, taskIdsByListId, listOrder } = window.$state.data;
+      const currentFilter = (window.$state.ui && window.$state.ui.taskFilter) || 'all';
+
+      // Render each list as a column
+      (listOrder || Object.keys(lists)).forEach(function (id) {
+        const listId = Number(id);
+        const list = lists[listId];
+        if (!list) return;
+
+        const listEl = document.createElement('article');
+        listEl.className = 'sv-tasks__list';
+        listEl.dataset.listId = String(listId);
+
+        // List drag-and-drop handlers
+        listEl.draggable = true;
+        listEl.addEventListener('dragstart', function (event) {
+          listDragState.listId = listId;
+          event.dataTransfer.effectAllowed = 'move';
+          listEl.classList.add('sv-tasks__list--dragging');
+        });
+
+        listEl.addEventListener('dragend', function () {
+          listDragState.listId = null;
+          listEl.classList.remove('sv-tasks__list--dragging');
+        });
+
+        listEl.addEventListener('dragover', function (event) {
+          if (!listDragState.listId || listDragState.listId === listId) return;
+          event.preventDefault();
+        });
+
+        listEl.addEventListener('drop', function (event) {
+          if (!listDragState.listId || listDragState.listId === listId) return;
+          event.preventDefault();
+          moveList(listDragState.listId, listId);
+        });
+
+        const headerEl = document.createElement('header');
+        headerEl.className = 'sv-tasks__list-header flex row align-items-center flex-space-between';
+
+        const titleEl = document.createElement('h2');
+        titleEl.className = 'sv-h-5 sv-tasks__list-title';
+        titleEl.textContent = list.name;
+
+        titleEl.addEventListener('click', function () {
+          var input = document.createElement('input');
+          input.type = 'text';
+          input.value = list.name;
+          input.className = 'sv-tasks__list-title-input';
+
+          function commit() {
+            renameList(listId, input.value);
+          }
+
+          input.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+              commit();
+            } else if (event.key === 'Escape') {
+              render();
+            }
+          });
+
+          input.addEventListener('blur', function () {
+            commit();
+          });
+
+          headerEl.replaceChild(input, titleEl);
+          input.focus();
+          input.select();
+        });
+
+        const menuButton = document.createElement('button');
+        menuButton.type = 'button';
+        menuButton.className = 'sv-icon-button sv-tasks__list-menu-button';
+        menuButton.setAttribute('aria-label', 'List actions');
+        menuButton.dataset.action = 'open-list-menu';
+        menuButton.textContent = '⋯';
+
+        menuButton.addEventListener('click', function () {
+          var ok = window.confirm
+            ? window.confirm('Delete list "' + list.name + '" and all its tasks?')
+            : true;
+          if (ok) {
+            deleteList(listId);
+          }
+        });
+
+        headerEl.appendChild(titleEl);
+        headerEl.appendChild(menuButton);
+
+        const bodyEl = document.createElement('div');
+        bodyEl.className = 'sv-tasks__list-body flex col gap-xs';
+
+        // Enable dropping tasks into this list body
+        bodyEl.addEventListener('dragover', function (event) {
+          if (!dragState.taskId) return;
+          event.preventDefault();
+        });
+
+        bodyEl.addEventListener('drop', function (event) {
+          if (!dragState.taskId) return;
+          event.preventDefault();
+          moveTask(dragState.taskId, listId, null);
+        });
+
+        // Render tasks for this list, if any
+        const taskIds = (taskIdsByListId && taskIdsByListId[listId]) || [];
+        taskIds.forEach(function (taskId) {
+          var task = tasks && tasks[taskId];
+          if (!task) return;
+          if (currentFilter === 'active' && task.completed) {
+            return;
+          }
+          if (currentFilter === 'completed' && !task.completed) {
+            return;
+          }
+
+          var taskCard = document.createElement('div');
+          taskCard.className = 'sv-tasks__task-card';
+          taskCard.dataset.taskId = String(taskId);
+          taskCard.draggable = true;
+
+          taskCard.addEventListener('dragstart', function (event) {
+            dragState.taskId = taskId;
+            dragState.fromListId = listId;
+            event.dataTransfer.effectAllowed = 'move';
+            taskCard.classList.add('sv-tasks__task-card--dragging');
+          });
+
+          taskCard.addEventListener('dragend', function () {
+            dragState.taskId = null;
+            dragState.fromListId = null;
+            taskCard.classList.remove('sv-tasks__task-card--dragging');
+          });
+
+          // Allow dropping another task before this card
+          taskCard.addEventListener('dragover', function (event) {
+            if (!dragState.taskId) return;
+            event.preventDefault();
+          });
+
+          taskCard.addEventListener('drop', function (event) {
+            if (!dragState.taskId) return;
+            event.preventDefault();
+            // Move dragged task into this list, before this task
+            moveTask(dragState.taskId, listId, taskId);
+          });
+
+          var taskMain = document.createElement('div');
+          taskMain.className = 'sv-tasks__task-main flex row gap-xs align-items-center';
+
+          var checkbox = document.createElement('input');
+          checkbox.type = 'checkbox';
+          checkbox.className = 'sv-tasks__task-checkbox';
+          checkbox.dataset.action = 'toggle-completed';
+          checkbox.checked = !!task.completed;
+          checkbox.addEventListener('change', function () {
+            toggleTaskCompleted(taskId);
+          });
+
+          var starButton = document.createElement('button');
+          starButton.type = 'button';
+          starButton.className = 'sv-icon-button sv-tasks__task-star';
+          starButton.dataset.action = 'toggle-starred';
+          starButton.setAttribute('aria-label', 'Mark as important');
+          starButton.textContent = task.starred ? '★' : '☆';
+          starButton.addEventListener('click', function () {
+            toggleTaskStarred(taskId);
+          });
+
+          var content = document.createElement('div');
+          content.className = 'sv-tasks__task-content flex col gap-2xs';
+
+          var titleNode = document.createElement('div');
+          titleNode.className = 'sv-tasks__task-title';
+          titleNode.textContent = task.title;
+
+          var meta = document.createElement('div');
+          meta.className = 'sv-tasks__task-meta';
+          if (task.dueDate) {
+            var timeEl = document.createElement('time');
+            timeEl.dateTime = task.dueDate;
+            timeEl.textContent = task.dueDate; // formatting can be improved later
+            meta.appendChild(timeEl);
+          }
+
+          content.appendChild(titleNode);
+          if (meta.childNodes.length > 0) {
+            content.appendChild(meta);
+          }
+
+          taskMain.appendChild(checkbox);
+          taskMain.appendChild(starButton);
+          taskMain.appendChild(content);
+
+          taskCard.appendChild(taskMain);
+          if (task.completed) {
+            taskCard.classList.add('sv-tasks__task-card--completed');
+          }
+          if (task.starred) {
+            taskCard.classList.add('sv-tasks__task-card--starred');
+          }
+          bodyEl.appendChild(taskCard);
+        });
+
+        const addTaskEl = document.createElement('div');
+        addTaskEl.className = 'sv-tasks__add-task';
+        const addTaskInput = document.createElement('input');
+        addTaskInput.type = 'text';
+        addTaskInput.className = 'sv-tasks__add-task-input';
+        addTaskInput.placeholder = 'Add task…';
+        addTaskInput.dataset.role = 'add-task-input';
+
+        addTaskInput.addEventListener('keydown', function (event) {
+          if (event.key === 'Enter') {
+            addTask(listId, addTaskInput.value);
+            addTaskInput.value = '';
+          }
+        });
+
+        addTaskEl.appendChild(addTaskInput);
+
+        listEl.appendChild(headerEl);
+        listEl.appendChild(bodyEl);
+        listEl.appendChild(addTaskEl);
+
+        board.appendChild(listEl);
+      });
+
+      // Add-list column at the end of the board
+      var addListColumn = document.createElement('article');
+      addListColumn.className = 'sv-tasks__add-list';
+      addListColumn.dataset.role = 'add-list-column';
+
+      addListColumn.addEventListener('dragover', function (event) {
+        if (!listDragState.listId) return;
+        event.preventDefault();
+      });
+
+      addListColumn.addEventListener('drop', function (event) {
+        if (!listDragState.listId) return;
+        event.preventDefault();
+        moveList(listDragState.listId, null);
+      });
+
+      var addListInput = document.createElement('input');
+      addListInput.type = 'text';
+      addListInput.className = 'sv-tasks__add-list-input';
+      addListInput.placeholder = 'New list…';
+      addListInput.dataset.role = 'add-list-input';
+
+      addListInput.addEventListener('keydown', function (event) {
+        if (event.key === 'Enter') {
+          addList(addListInput.value);
+          addListInput.value = '';
+        }
+      });
+
+      addListColumn.appendChild(addListInput);
+      board.appendChild(addListColumn);
+
+      applyTaskFilterUI();
+    }
+    function deleteList(listId) {
+      var state = window.$state;
+      if (!state || !state.data) return;
+
+      var lists = state.data.lists || {};
+      var tasks = state.data.tasks || {};
+      var taskIdsByListId = state.data.taskIdsByListId || {};
+      var listOrder = state.data.listOrder || [];
+
+      var numericId = Number(listId);
+      if (!lists[numericId]) return;
+
+      // Prevent deleting the last remaining list
+      if (Object.keys(lists).length <= 1) {
+        if (window.alert) {
+          window.alert('You must have at least one list.');
+        }
+        return;
+      }
+
+      // Remove tasks belonging to this list
+      var idsToRemove = taskIdsByListId[numericId] || [];
+      idsToRemove.forEach(function (taskId) {
+        delete tasks[taskId];
+      });
+      delete taskIdsByListId[numericId];
+
+      // Remove the list and update ordering
+      delete lists[numericId];
+      listOrder = listOrder.filter(function (id) {
+        return Number(id) !== numericId;
+      });
+
+      state.data.lists = lists;
+      state.data.tasks = tasks;
+      state.data.taskIdsByListId = taskIdsByListId;
+      state.data.listOrder = listOrder;
+
+      touchUpdatedAt();
+      render();
+    }
+
+    document.addEventListener('DOMContentLoaded', function () {
+      initState();
+      render();
+      applyTaskFilterUI();
+
+      var filterButtons = document.querySelectorAll('.sv-tasks__filter-button');
+      filterButtons.forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var filter = btn.dataset.filter;
+          setTaskFilter(filter);
+        });
+      });
+    });
+
+    // Expose for debugging in the console
+    window.SvTasks = {
+      initState: initState,
+      render: render,
+      addList: addList,
+      renameList: renameList,
+      addTask: addTask,
+      toggleTaskCompleted: toggleTaskCompleted,
+      toggleTaskStarred: toggleTaskStarred,
+      moveTask: moveTask,
+      moveList: moveList,
+      setTaskFilter: setTaskFilter,
+      deleteList: deleteList,
+    };
+  })();
+</script>

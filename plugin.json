@@ -1,0 +1,40 @@
+{
+  "type": "custom",
+  "id": "@sovereign/tasks",
+  "namespace": "tasks",
+  "name": "Tasks",
+  "description": "Dead simple, offline-first task lists.",
+  "version": "0.1.0",
+  "devOnly": false,
+  "draft": false,
+  "entryPoints": {
+    "web": "routes/web/index.js"
+  },
+  "corePlugin": false,
+  "author": "Sovereign Community",
+  "license": "AGPL-3.0",
+  "ui": {
+    "icon": { "name": "timeline" },
+    "palette": {
+      "primary": "sky-600",
+      "accent": "sky-300"
+    },
+    "layout": {
+      "sidebar": true,
+      "header": true
+    }
+  },
+  "sovereign": {
+    "schemaVersion": 1,
+    "allowMultipleInstances": false,
+    "compat": { "platform": "^0.7.3", "node": ">=20" },
+    "platformCapabilities": {},
+    "userCapabilities": [
+      {
+        "key": "user:plugin.tasks.feature",
+        "description": "Access Tasks plugin.",
+        "roles": ["platform:user"]
+      }
+    ]
+  }
+}
