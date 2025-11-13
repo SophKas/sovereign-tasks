@@ -34,10 +34,25 @@ model Task {
   userId            String    @map("user_id")
   listId            Int       @map("list_id")
   title             String    @map("title")
-  description       String?   @db.Text @map("description")
+  description       String?   @map("description")
   dueDate           DateTime? @map("due_date")
-  recurringRule     String?   @map("recurring_rule")
-  recurringInterval Int?      @map("recurring_interval")
+
+  /// Structured recurrence configuration (mirrors client-side `task.recurring`):
+  /// {
+  ///   "kind": "preset" | "custom",
+  ///   "preset"?: "daily" | "weekly" | "monthly" | "yearly" | "weekday",
+  ///   "custom"?: {
+  ///     "interval": number,
+  ///     "unit": "day" | "week" | "month" | "year",
+  ///     "ends": {
+  ///       "type": "never" | "onDate" | "afterCount",
+  ///       "date"?: string,   // ISO date for "onDate"
+  ///       "count"?: number   // remaining occurrences for "afterCount"
+  ///     }
+  ///   }
+  /// }
+  recurringConfig   Json?     @map("recurring_config")
+
   completed         Boolean   @default(false) @map("completed")
   starred           Boolean   @default(false) @map("starred")
   position          Int       @default(0) @map("position") // ordering inside list

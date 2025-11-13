@@ -33,6 +33,10 @@ export async function seed({ prisma }) {
         completed: false,
         starred: true,
         position: 0,
+        recurringConfig: {
+          kind: "preset",
+          preset: "weekly"
+        }
       },
       {
         userId,
@@ -42,6 +46,7 @@ export async function seed({ prisma }) {
         completed: false,
         starred: false,
         position: 1,
+        recurringConfig: null
       },
       {
         userId,
@@ -51,6 +56,14 @@ export async function seed({ prisma }) {
         completed: false,
         starred: true,
         position: 0,
+        recurringConfig: {
+          kind: "custom",
+          custom: {
+            interval: 2,
+            unit: "week",
+            ends: { type: "afterCount", count: 3 }
+          }
+        }
       },
       {
         userId,
@@ -59,7 +72,8 @@ export async function seed({ prisma }) {
         completed: true,
         starred: false,
         position: 1,
-      },
+        recurringConfig: null
+      }
     ],
   });
 
