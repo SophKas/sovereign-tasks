@@ -1773,6 +1773,14 @@
             sortTasksInList(listId, 'dueDate');
           });
 
+          addItem('Delete completed tasks', function () {
+            var ok = window.confirm
+              ? window.confirm('Delete all completed tasks in "' + list.name + '"?')
+              : true;
+            if (!ok) return;
+            deleteCompletedTasksInList(listId);
+          });
+
           var divider = document.createElement('div');
           divider.className = 'sv-tasks__list-menu-divider';
           menu.appendChild(divider);
@@ -1911,6 +1919,7 @@
           if (task.recurring) {
             var recurSpan = document.createElement('span');
             var label = '';
+            var details = '';
             var r = task.recurring;
 
             if (typeof r === 'string') {
@@ -1953,6 +1962,31 @@
                   else if (unit === 'year') unitLabel = 'years';
                 }
                 label = 'Every ' + iv + ' ' + unitLabel;
+
+                // Ends hints for custom recurrences
+                if (r.custom.ends && typeof r.custom.ends === 'object') {
+                  var ends = r.custom.ends;
+                  var type = ends.type || 'never';
+                  if (type === 'afterCount') {
+                    var count = parseInt(ends.count, 10);
+                    if (count && count > 0) {
+                      details = ' (' + count + ' left)';
+                    }
+                  } else if (type === 'onDate' && ends.date) {
+                    var endDate = parseDateFlexible(ends.date);
+                    if (endDate && !Number.isNaN(endDate.getTime())) {
+                      try {
+                        var opts = { day: 'numeric', month: 'short' };
+                        var formatted = endDate.toLocaleDateString(undefined, opts);
+                        details = ' (Ends on ' + formatted + ')';
+                      } catch (e) {
+                        details = ' (Ends on ' + String(ends.date) + ')';
+                      }
+                    } else {
+                      details = ' (Ends on ' + String(ends.date) + ')';
+                    }
+                  }
+                }
               }
             }
 
@@ -1960,7 +1994,7 @@
               if (meta.childNodes.length > 0) {
                 recurSpan.style.marginLeft = '0.25rem';
               }
-              recurSpan.textContent = '• ' + label;
+              recurSpan.textContent = '• ' + label + details;
               meta.appendChild(recurSpan);
             }
           }
@@ -2093,6 +2127,37 @@
       render();
     }
 
+    function deleteCompletedTasksInList(listId) {
+      var state = window.$state;
+      if (!state || !state.data) return;
+
+      var tasks = state.data.tasks || {};
+      var taskIdsByListId = state.data.taskIdsByListId || {};
+      var numericListId = Number(listId);
+
+      var listTaskIds = taskIdsByListId[numericListId] || [];
+      if (!listTaskIds.length) return;
+
+      // Filter out completed tasks and delete them from the tasks map
+      var remainingTaskIds = [];
+      listTaskIds.forEach(function (id) {
+        var numericTaskId = Number(id);
+        var task = tasks[numericTaskId];
+        if (task && task.completed) {
+          delete tasks[numericTaskId];
+        } else {
+          remainingTaskIds.push(id);
+        }
+      });
+
+      taskIdsByListId[numericListId] = remainingTaskIds;
+      state.data.tasks = tasks;
+      state.data.taskIdsByListId = taskIdsByListId;
+
+      touchUpdatedAt();
+      render();
+    }
+
     function deleteList(listId) {
       var state = window.$state;
       if (!state || !state.data) return;
@@ -2182,6 +2247,7 @@
       setTaskFilter: setTaskFilter,
       deleteList: deleteList,
       deleteTask: deleteTask,
+      deleteCompletedTasksInList: deleteCompletedTasksInList,
       saveState: saveState,
       loadState: loadState,
       resetState: resetState,
